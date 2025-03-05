@@ -1,0 +1,7 @@
+opencv-python
+tqdm
+numpy
+# torch
+chamferdist
+matplotlib
+open3d
