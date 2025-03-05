@@ -1,6 +1,12 @@
 # COLMAP to Real-World Pose Conversion
 
-It is hard to find extrinsic matrices for external cameras in the real world, especially when you have a fixed world-coordinate frame. This repository provides a way to convert the extrinsic matrices from COLMAP to real-world poses.
+> *TL;DR: How to find the camera poses with respect to the robot base frame?*
+
+![Question](./figs/question.png)
+
+## Introduction
+
+It is challenging to determine the extrinsic matrices for external cameras in real-world scenarios, particularly when dealing with a fixed world-coordinate frame. This is a common issue in vision-based robotic applications. This repository offers a method to convert the extrinsic matrices from COLMAP to real-world poses.
 
 ## Installation
 1. Clone this repository to your local machine.
