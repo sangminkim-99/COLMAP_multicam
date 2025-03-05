@@ -25,6 +25,12 @@ bash run.sh # here, you should check all paths are correct
 
 ## Registration of RGB-D images
 
+With the calculated poses, we can register the RGB-D images to the real-world coordinate frame. The following images show the registration of the RGB-D images to the real-world coordinate frame.
+
+You can see the origin of the world coordinate frame is at the center of franka panda robot base.
+
+![Registration](./figs/registration_result.png)
+
 # Acknowledgements
 
 - `colmap_to_nerf.py` is adapted from [instant-ngp](https://github.com/NVlabs/instant-ngp/blob/master/scripts/colmap2nerf.py).
