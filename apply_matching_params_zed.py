@@ -36,9 +36,9 @@ def read_colmap(json_path):
         fname = frame['file_path']
         fname = fname.split('/')[-1]
         if 'color' in fname:
-            img_idx = int(fname.replace('-color.png', ''))
+            img_idx = fname.replace('-color.png', '')
         else:
-            img_idx = int(fname.replace('.png', ''))
+            img_idx = fname.replace('.png', '')
 
         pose = np.array(frame['transform_matrix'])
 
@@ -47,7 +47,7 @@ def read_colmap(json_path):
     # remove poses that are robot poses (for now, it is < 50)
     remove_keys = []
     for img_idx in img_pose_dict.keys():
-        if img_idx < 50:
+        if str.isdigit(img_idx) and int(img_idx) < 50:
             remove_keys.append(img_idx)
 
     for key in remove_keys:

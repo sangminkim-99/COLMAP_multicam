@@ -68,11 +68,11 @@ def read_intrinsic(json_path):
         fname = frame['file_path']
         fname = fname.split('/')[-1]
         if 'color' in fname:
-            img_idx = int(fname.replace('-color.png', ''))
+            img_idx = fname.replace('-color.png', '')
         else:
-            img_idx = int(fname.replace('.png', ''))
+            img_idx = fname.replace('.png', '')
 
-        if img_idx > 50:
+        if not str.isdigit(img_idx) or int(img_idx) > 50:
             for key in intrinsic_keys:
                 intrinsic_dict[key] = frame[key]
             break
@@ -97,7 +97,9 @@ def check_new_poses(new_pose_path, image_dir, json_path):
 
         rgb_image = cv2.imread(rgb_path)
         rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
-        depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED) / 1000.0
+
+        depth_scale = 4000.0 if serial_number == "f1150952" else 1000.0
+        depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED) / depth_scale
 
         pcd = depth_to_pointcloud(depth_image, rgb_image, intrinsic_dict)
 

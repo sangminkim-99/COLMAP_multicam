@@ -40,9 +40,9 @@ def read_colmap(json_path):
         fname = frame['file_path']
         fname = fname.split('/')[-1]
         if 'color' in fname:
-            img_idx = int(fname.replace('-color.png', ''))
+            img_idx = fname.replace('-color.png', '')
         else:
-            img_idx = int(fname.replace('.png', ''))
+            img_idx = fname.replace('.png', '')
 
         pose = np.array(frame['transform_matrix'])
 
@@ -51,7 +51,8 @@ def read_colmap(json_path):
     # remove poses that are not in txt file (for now, it is > 50)
     remove_keys = []
     for img_idx in img_pose_dict.keys():
-        if img_idx > 50:
+        # check is digit and greater than 50
+        if not str.isdigit(img_idx) or int(img_idx) > 50:
             remove_keys.append(img_idx)
 
     for key in remove_keys:
@@ -141,6 +142,7 @@ def align(model, data):
     return rot,trans,trans_error, s, model_aligned, alignment_error, model_mean
 
 
+
 def align_torch(model, data_, args, optimize_ee2cam=False):
     device = "cuda"
     data_ = torch.from_numpy(data_).float().to(device)
@@ -153,62 +155,46 @@ def align_torch(model, data_, args, optimize_ee2cam=False):
     # data = torch.from_numpy(data).to(device).float()
 
     # optimization variables
-    roll = Variable(torch.tensor([0]).float().to(device), requires_grad=True)
-    pitch = Variable(torch.tensor([0]).float().to(device), requires_grad=True)
-    yaw = Variable(torch.tensor([0]).float().to(device), requires_grad=True)
+    rotation = Variable(torch.tensor([1, 0, 0, 0, 1, 0]).float().to(device), requires_grad=True)
     scale = Variable(torch.tensor([1]).float().to(device), requires_grad=True)
     trans = Variable(torch.zeros(3, 1).float().to(device), requires_grad=True)
-    ee2cam = Variable(torch.tensor([0.055, 0.0325, -0.05]).float().to(device), requires_grad=True)
+    # ee2cam = Variable(torch.tensor([0.055, 0.0325, -0.05]).float().to(device), requires_grad=True)
+    ee2cam = Variable(torch.tensor([0.069, 0.038, -0.022]).float().to(device), requires_grad=True)
+    ee2cam_rot = Variable(torch.tensor([1, 0, 0, 0, 1, 0]).float().to(device), requires_grad=True)
     optimizer = optim.Adam([
             {'params': trans, 'lr': 0.01},
-            {'params': roll, 'lr': 0.01},
-            {'params': pitch, 'lr': 0.01},
-            {'params': yaw, 'lr': 0.01},
+            {'params': rotation, 'lr': 0.01},
             {'params': scale, 'lr': 0.01},
             {'params': ee2cam, 'lr': 0.001},
+            {'params': ee2cam_rot, 'lr': 0.001},
         ])
-    scaler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.9)
-    chamfer = ChamferDistance()
+    scaler = ReduceLROnPlateau(optimizer, mode='min', patience=100, factor=0.95, verbose=True)
 
-    def rpy_to_rotmat(roll, pitch, yaw):
-        # rotation matrix from roll, pitch, yaw
-        tensor_0 = torch.zeros(1, device=device)
-        tensor_1 = torch.ones(1, device=device)
-        RX = torch.stack([
-            torch.stack([tensor_1, tensor_0, tensor_0]),
-            torch.stack([tensor_0, cos(roll), -sin(roll)]),
-            torch.stack([tensor_0, sin(roll), cos(roll)])]).reshape(3, 3)
-
-        RY = torch.stack([
-                        torch.stack([cos(pitch), tensor_0, sin(pitch)]),
-                        torch.stack([tensor_0, tensor_1, tensor_0]),
-                        torch.stack([-sin(pitch), tensor_0, cos(pitch)])]).reshape(3, 3)
-
-        RZ = torch.stack([
-                        torch.stack([cos(yaw), -sin(yaw), tensor_0]),
-                        torch.stack([sin(yaw), cos(yaw), tensor_0]),
-                        torch.stack([tensor_0, tensor_0, tensor_1])]).reshape(3, 3)
-
-        r = torch.mm(RZ, RY)
-        r = torch.mm(r, RX)
-        return r
+    def sixdrot_to_rotmat(sixdrot):
+        v1 = sixdrot[:3]
+        v2 = sixdrot[3:]
+        e1 = v1 / torch.linalg.norm(v1)
+        u2 = v2 - torch.dot(e1, v2) * e1
+        e2 = u2 / torch.linalg.norm(u2)
+        v3 = torch.cross(e1, e2, dim=0)
+        e3 = v3 / torch.linalg.norm(v3)
+        rotation_matrix = torch.stack([e1, e2, e3]).t()
+        return rotation_matrix
 
     _, N = model.shape
+
     # optimize
-    for i_ter in tqdm(range(2000)):
+    for i_ter in tqdm(range(10000)):
         optimizer.zero_grad()
         # calculate loss
-        rot_mat = rpy_to_rotmat(roll, pitch, yaw)
-        model_mean = model.mean(dim=1).view(3, 1) # (3, 1)
-        transformed_model = model - model_mean
-        transformed_model = rot_mat @ transformed_model
-        transformed_model = scale * transformed_model
-        transformed_model = transformed_model + model_mean.repeat((1, N)) + trans.view(3, 1)
+        rot_mat = sixdrot_to_rotmat(rotation)
+        transformed_model = scale * rot_mat @ model + trans.view(3, 1)
         # loss = chamfer(transformed_model.unsqueeze(dim=0), data.unsqueeze(dim=0), bidirectional=True, point_reduction='mean')
         # let's get our data
         if optimize_ee2cam:
             cam_transforms = ee_pose.to(device)
-            cam_transforms[:, :3, 3] = cam_transforms[:, :3, 3] + (cam_transforms[:, :3, :3] @ (ee2cam))
+            ee2cam_rot_mat = sixdrot_to_rotmat(ee2cam_rot)
+            cam_transforms[:, :3, 3] = cam_transforms[:, :3, 3] + (ee2cam_rot_mat @ cam_transforms[:, :3, :3] @ (ee2cam))
             data = cam_transforms @ torch.from_numpy(fix_pose_mat).float().to(device)
             data = data @ torch.from_numpy(flip_mat).float().to(device)
             data = data[:, :3, -1]
@@ -221,28 +207,18 @@ def align_torch(model, data_, args, optimize_ee2cam=False):
         loss.backward()
         optimizer.step()
         scaler.step(loss)
-
-    # visualize the final result
-    if optimize_ee2cam:
-        data = data.detach().cpu().numpy()
-    else:
-        data = data_.detach().cpu().numpy()
-    transformed_model = transformed_model.detach().cpu().numpy()
-    fig = plt.figure()
-    ax = fig.add_subplot(projection='3d')
-    for i in range(N):
-        ax.scatter(data[0], data[1], data[2], c='r')
-        ax.scatter(transformed_model[0], transformed_model[1], transformed_model[2], c='c')
-    plt.show()
+        if i_ter % 100 == 0:
+            print("iter {}: loss {}".format(i_ter, loss.item()))
 
     print("For torch based optim:")
     print("Final loss: {}".format(loss.item()))
     print("ee2cam:")
     print(ee2cam.detach().cpu().numpy())
+    print("ee2cam_rot:")
+    print(sixdrot_to_rotmat(ee2cam_rot).detach().cpu().numpy())
 
     # return the output
-    # return rot_mat.detach().cpu().numpy(), model_mean.cpu().numpy(), scale.detach().cpu().numpy(), trans.detach().cpu().numpy()
- 
+    return rot_mat.detach().cpu().numpy(), scale.detach().cpu().numpy(), trans.detach().cpu().numpy(), ee2cam.detach().cpu().numpy()
 
 
 if __name__ == "__main__":
@@ -263,8 +239,8 @@ if __name__ == "__main__":
 
     rot, trans, trans_error, s, model_aligned, alignment_error, mean_pos = align(colmap_points.transpose(), world_points.transpose())
     print("Final trans error for horn's method: {}".format(trans_error.mean()))
-    align_torch(colmap_points.transpose(), world_points.transpose(), args)
-    
+    # align_torch(colmap_points.transpose(), world_points.transpose(), args)
+    rot_t, scale_t, trans_t, ee2cam_t = align_torch(colmap_points.transpose(), world_points.transpose(), args, True)
 
     # final_poses
     final_poses = colmap_poses.copy()
@@ -277,9 +253,12 @@ if __name__ == "__main__":
         final_poses[idx, 2, -1] = translation[2]
 
     # save to disk
-    rot = np.array(rot)
-    trans = np.array(trans)
-    s = np.array([s])
+    # rot = np.array(rot)
+    # trans = np.array(trans)
+    # s = np.array([s])
+    rot = rot_t
+    trans = trans_t
+    s = scale_t
 
     np.savez_compressed("matching_params.npz", rotation=rot, translation=trans, scale=s, mean_pos=mean_pos)
 
